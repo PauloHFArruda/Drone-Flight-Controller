@@ -1,6 +1,6 @@
 #pragma once
 
-#define RADIO_CHANNELS_NUMBER 6
+#define RADIO_CHANNELS_NUMBER 8 // max value = 8
 
 enum RadioInput
 {
@@ -10,6 +10,8 @@ enum RadioInput
   THROTTLE,
   PITCH,
   ROLL,
+  PARAM_ADJUST_1,
+  PARAM_ADJUST_2
 };
 
 typedef struct
@@ -28,4 +30,5 @@ class Radio {
         void begin();
         void update();
         void printInputs();
+        void printInput(int number);
 };
