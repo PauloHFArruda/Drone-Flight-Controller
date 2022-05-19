@@ -7,7 +7,7 @@
 #include "IMUAdapter.h"
 #include "Radio.h"
 
-#define FLOAT_SIZE 4 // bytes
+#define FLOAT_SIZE 8 // bytes
 
 const float RAD2DEG = 180.0/PI;
 const float DEG2RAD = PI/180.0;
@@ -99,36 +99,13 @@ void motorIputConversion(float pwm[], float Uz, float Uphi, float Utheta, float 
 
 void update_controller_params(char byte1, char byte2)
 {
-  int selector = byte1 >> 4;
-  int value = ((byte1 & 0x0f) << 8) + byte2;
+  int selector = map(radio.inputs[FLY_MODE], 1000, 2000, 0, 6);
   Serial.print("selector: ");
   Serial.print(selector);
-  Serial.print(" value: ");
-  Serial.println(value);
-
-  switch (selector)
-  {
-  case 0:
-    controllers[0].Kp = value;
-    break;
-  case 1:
-    controllers[0].Kd = value;
-    break;
-  case 2:
-    controllers[0].Ki = value;
-    break;
-  case 3:
-    controllers[1].Kp = value;
-    break;
-  case 4:
-    controllers[1].Kd = value;
-    break;
-  case 5:
-    controllers[1].Ki = value;
-    break;
-  default:
-    break;
-  }
+  int value = ((byte1 & 0x0f) << 8) + byte2;
+  Serial.println(" ");
+  // Serial.print(" value: ");
+  // Serial.println(value);
 }
 
 void readRotRef(float rotd[]) {
@@ -149,24 +126,56 @@ void filterRotRef(float rotd[]) {
 }
 
 void updatePIDParams() {
-  // kp = mapfloat((float)radio.inputs[FLY_MODE], 1000, 2000, 0, 15);
-  // ki = mapfloat((float)radio.inputs[ARM], 1000, 2000, 0, 0.5);
+  long selector = lroundf(mapfloat(radio.inputs[FLY_MODE], 1000, 2000, 0, 2));
 
-  // controllers[0].Kp = kp;
-  // controllers[0].Ki = ki;
-  // controllers[1].Kp = kp;
-  // controllers[1].Ki = ki;
-}
+  float aux = mapfloat(radio.inputs[PARAM_ADJUST_1], 980, 1470, -0.1, 0.1);
+  aux = abs(aux) < 0.1*0.15 ? 0 : aux;
+  float value1 = aux*abs(aux);
+  aux = mapfloat(radio.inputs[PARAM_ADJUST_2], 1080, 1900, -0.1, 0.1);
+  aux = abs(aux) < 0.1*0.15 ? 0 : aux;
+  float value2 = aux*abs(aux);
 
-void savePIDParams() {
-  for (int i = 0; i < 3; i++) {
-    controllers[i].Kp = EEPROM_readFloat(FLOAT_SIZE*(3*i+0));
-    controllers[i].Kd = EEPROM_readFloat(FLOAT_SIZE*(3*i+0));
-    controllers[i].Ki = EEPROM_readFloat(FLOAT_SIZE*(3*i+0));
+  switch (selector)
+  {
+  case 0:
+    controllers[0].Kp += value1;
+    controllers[0].Kp = sat(controllers[0].Kp, 0, 50);
+    controllers[1].Kp += value1;
+    controllers[1].Kp = sat(controllers[1].Kp, 0, 50);
+    
+    controllers[2].Kp += value2;
+    controllers[2].Kp = sat(controllers[2].Kp, 0, 50);
+    break;
+  case 1:
+    controllers[0].Kd += 0.4*value1;
+    controllers[0].Kd = sat(controllers[0].Kd, 0, 20);
+    controllers[1].Kd += 0.4*value1;
+    controllers[1].Kd = sat(controllers[1].Kd, 0, 20);
+    
+    controllers[2].Kd += 0.4*value2;
+    controllers[2].Kd = sat(controllers[2].Kd, 0, 20);
+    break;
+  case 2:
+    controllers[0].Ki += 0.05*value1;
+    controllers[0].Ki = sat(controllers[0].Ki, 0, 3);
+    controllers[1].Ki += 0.05*value1;
+    controllers[1].Ki = sat(controllers[1].Ki, 0, 3);
+    
+    controllers[2].Ki += 0.05*value2;
+    controllers[2].Ki = sat(controllers[2].Ki, 0, 3);
+    break;
   }
 }
 
 void loadPIDParams() {
+  for (int i = 0; i < 3; i++) {
+    controllers[i].Kp = EEPROM_readFloat(FLOAT_SIZE*(3*i+0));
+    controllers[i].Kd = EEPROM_readFloat(FLOAT_SIZE*(3*i+1));
+    controllers[i].Ki = EEPROM_readFloat(FLOAT_SIZE*(3*i+2));
+  }
+}
+
+void savePIDParams() {
   for (int i = 0; i < 3; i++) {
     EEPROM_writeFloat(FLOAT_SIZE*(3*i+0), controllers[i].Kp);
     EEPROM_writeFloat(FLOAT_SIZE*(3*i+1), controllers[i].Kd);
@@ -175,16 +184,16 @@ void loadPIDParams() {
 }
 
 void printPIDParams() {
-  for (int i = 0; i < 3; i++) {
-    Serial.print("Controller ");
-    Serial.print(i+1);
-    Serial.print(" -> Kp: ");
+  for (int i = 1; i < 3; i++) {
+    // Serial.print("Controller ");
+    // Serial.print(i+1);
+    Serial.print(" Kp: ");
     Serial.print(controllers[i].Kp);
-    Serial.print(", Kd: ");
+    Serial.print(" Kd: ");
     Serial.print(controllers[i].Kd);
-    Serial.print(", Ki: ");
+    Serial.print(" Ki: ");
     Serial.print(controllers[i].Ki);
-    Serial.print("\n");
+    // Serial.print("\n");
   }
 }
 
@@ -201,6 +210,7 @@ void setup()
 
   delay(3000);
 
+  if (radio.inputs[RadioInput::FLY_MODE] < 1200)
   loadPIDParams();
   printPIDParams();
 }
@@ -208,7 +218,6 @@ void setup()
 void loop()
 {
   static float dt, currentTime, timePrev;
-  static int desarming_counter = 0;
 
   currentTime = millis();
   dt = (currentTime - timePrev) / 1000;
@@ -223,7 +232,7 @@ void loop()
   float pid_out[3];
   for (int i = 0; i < 3; i++)
   {
-    pid_out[i] = 17*controllers[i].calc(rot[i], rotd[i], dt);
+    pid_out[i] = 20*controllers[i].calc(rot[i], rotd[i], dt);
     //pid_out[i] = sat(pid_out[i], -400, 400);
   }
 
@@ -240,27 +249,35 @@ void loop()
 
   if (mot_activated == 1)
   {
+    Serial.println();
     for (int i = 0; i < 4; i++)
       motors[i].writeMicroseconds(pwm[i]);
   }
     
-  if (radio.inputs[RadioInput::THROTTLE] < 1100)
-    desarming_counter++;
-  else
-    desarming_counter = 0;
-    
-  if (desarming_counter == 50)
+  if (mot_activated) 
   {
-    mot_activated = 0;
-    turnMotorsOff();
-    savePIDParams();
+    if (radio.inputs[RadioInput::THROTTLE] < 1100 &&
+        radio.inputs[RadioInput::ARM] < 1500) {
+      mot_activated = 0;
+      turnMotorsOff();
+      savePIDParams();
+    }
   }
+  else if (radio.inputs[RadioInput::THROTTLE] < 1100 &&
+      radio.inputs[RadioInput::ARM] > 1500) {
+    mot_activated = 1;
+  }
+
+  updatePIDParams();
 
   // imu.printRotation();
   // printPIDOut(pid_out);
   // printRotRef(rotd);
   // printPWM(pwm);
   // radio.printInputs();
+  // printPIDParams();
+  // radio.printInput(6);
+  // radio.printInput(7);
   // Serial.print("Motor_activate:");
   // Serial.print(mot_activated);
   // Serial.print(" Kp:");
