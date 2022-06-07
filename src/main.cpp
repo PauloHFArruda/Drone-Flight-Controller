@@ -6,6 +6,7 @@
 #include "PIDController.h"
 #include "IMUAdapter.h"
 #include "Radio.h"
+#include "SerialComunication.h"
 
 #define FLOAT_SIZE 8 // bytes
 
@@ -20,6 +21,7 @@ Servo motors[4];
 
 IMUAdapter imu;
 Radio radio;
+SerialComunication esp;
 
 PIDController controllers[3] = {
     PIDController(12, 0.2, 4.20),
@@ -29,6 +31,7 @@ PIDController controllers[3] = {
 int mot_activated = 1;
 float rot[3];  // [phi, theta, psi] mesuarement
 float rotd[3]; // [phid, thetad, psid] desired
+float pwm[4];
 
 void EEPROM_writeFloat(int ee, float value)
 {
@@ -197,11 +200,73 @@ void printPIDParams() {
   }
 }
 
+void handleESPMsg(char msgType, float data[], int len) {
+  Serial.print("MsgType: ");
+  Serial.write(msgType);
+  Serial.println();
+  if (msgType < 70) {
+    switch (msgType)
+    {
+    case MsgType::GET_PID_PARAMS:
+      Serial2.write(MsgType::RESP_PID_PARAMS);
+      for (int i = 0; i < 3; i++) {
+        Serial2.print(controllers[i].Kp);
+        Serial2.print(controllers[i].Ki);
+        Serial2.print(controllers[i].Kd);
+      }
+      Serial2.write(MSG_END_CHAR);
+      break;
+    case MsgType::GET_ROT:
+      Serial2.write(MsgType::RESP_ROT);
+      for (int i = 0; i < 3; i++)
+        Serial2.print(rot[i]);
+      Serial2.write(MSG_END_CHAR);
+      break;
+    case MsgType::GET_PWM:
+      Serial2.write(MsgType::RESP_PWM);
+      for (int i = 0; i < 4; i++)
+        Serial2.print(pwm[i]);
+      Serial2.write(MSG_END_CHAR);
+      break;
+    case MsgType::GET_ROT_AND_PWM:
+      Serial2.write(MsgType::RESP_ROT_AND_PWM);
+      for (int i = 0; i < 3; i++)
+        Serial2.print(rot[i]);
+      for (int i = 0; i < 4; i++)
+        Serial2.print(pwm[i]);
+      Serial2.write(MSG_END_CHAR);
+      break;
+
+    default:
+      break;
+    }
+  } else if (msgType < 80) {
+    switch ((msgType-70)%3)
+    {
+    case 0:
+      controllers[(msgType - 70)/3].Kp = data[0];
+      break;
+    case 1:
+      controllers[(msgType - 70)/3].Ki = data[0];
+      break;
+    case 2:
+      controllers[(msgType - 70)/3].Kd = data[0];
+      break;
+    
+    default:
+      break;
+    }
+  }
+}
+
+
 void setup()
 {
   Serial.begin(9600);
   radio.begin();
   imu.begin();
+  Serial2.begin(115200);
+  esp.begin(handleESPMsg);
 
   for (int i = 0; i < 4; i++)
     motors[i].attach(motor_pins[i]);
@@ -215,7 +280,13 @@ void setup()
   printPIDParams();
 }
 
-void loop()
+void loop() {
+  if (Serial2.available()) {
+    esp.updateBuffer(Serial2.read());
+  }
+}
+
+void loop_()
 {
   static float dt, currentTime, timePrev;
 
@@ -236,7 +307,6 @@ void loop()
     //pid_out[i] = sat(pid_out[i], -400, 400);
   }
 
-  float pwm[4];
   motorIputConversion(
       pwm,
       radio.inputs[RadioInput::THROTTLE],
