@@ -5,8 +5,8 @@
 	private:
 
 	public:
-		double Kp, Ki, Kd, dt, _e_prev, _i;
-		PIDController(double Kp_ = 1, double Ki_ = 1, double Kd_ = 1);
-		double calc(double x, double xd, double dt);
+		float Kp, Ki, Kd, dt, _e_prev, _i;
+		PIDController(float Kp_ = 1, float Ki_ = 1, float Kd_ = 1);
+		float calc(float x, float xd, float dt);
 	};
 #endif // !PIDCONTROLLER_H

@@ -1,6 +1,6 @@
 #include "utils.h"
 
-double sat(double val, double min, double max) {
+float sat(float val, float min, float max) {
     return val < min ? min : (val > max ? max : val);
 }
 
@@ -30,7 +30,7 @@ float strToPositiveFloat(char str[]) {
 }
 
 float strToFloat(char str[]) {
-    return (str[0] == '-' ? -strToPositiveFloat(str+1) : strToPositiveFloat(str));
+    return str[0] == '-' ? -strToPositiveFloat(str+1) : strToPositiveFloat(str);
 }
 
 void copyFloatArray(float src[], float dst[], int len) {

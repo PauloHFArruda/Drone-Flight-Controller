@@ -13,7 +13,7 @@
 const float RAD2DEG = 180.0/PI;
 const float DEG2RAD = PI/180.0;
 
-/*------------------*/
+
 enum Prop {LF, RF, LB, RB};
 const int motor_pins[4] = {36, 34, 35, 37};
 
@@ -28,7 +28,7 @@ PIDController controllers[3] = {
     PIDController(12, 0.2, 4.20),
     PIDController(10.85, 0.1, 0.65)};
 
-int mot_activated = 1;
+bool motorsActive = true;
 float rot[3];  // [phi, theta, psi] mesuarement
 float rotd[3]; // [phid, thetad, psid] desired
 float pwm[4];
@@ -100,17 +100,6 @@ void motorIputConversion(float pwm[], float Uz, float Uphi, float Utheta, float 
   pwm[Prop::RB] = 115 + Uz - Uphi + Utheta + Upsi;
 }
 
-void update_controller_params(char byte1, char byte2)
-{
-  int selector = map(radio.inputs[FLY_MODE], 1000, 2000, 0, 6);
-  Serial.print("selector: ");
-  Serial.print(selector);
-  int value = ((byte1 & 0x0f) << 8) + byte2;
-  Serial.println(" ");
-  // Serial.print(" value: ");
-  // Serial.println(value);
-}
-
 void readRotRef(float rotd[]) {
   rotd[0] = mapfloat((float)radio.inputs[ROLL], 1000, 2000, -10*DEG2RAD, 10*DEG2RAD);
   rotd[1] = mapfloat((float)radio.inputs[PITCH], 1000, 2000, -10*DEG2RAD, 10*DEG2RAD);
@@ -125,48 +114,6 @@ void filterRotRef(float rotd[]) {
     rotd[i] = 0.4*rotd[i] + 0.3*rotd_prev[0][i] + 0.2*rotd_prev[1][i];
     rotd_prev[0][i] = temp;
     rotd_prev[1][i] = rotd_prev[0][i];
-  }
-}
-
-void updatePIDParams() {
-  long selector = lroundf(mapfloat(radio.inputs[FLY_MODE], 1000, 2000, 0, 2));
-
-  float aux = mapfloat(radio.inputs[PARAM_ADJUST_1], 980, 1470, -0.1, 0.1);
-  aux = abs(aux) < 0.1*0.15 ? 0 : aux;
-  float value1 = aux*abs(aux);
-  aux = mapfloat(radio.inputs[PARAM_ADJUST_2], 1080, 1900, -0.1, 0.1);
-  aux = abs(aux) < 0.1*0.15 ? 0 : aux;
-  float value2 = aux*abs(aux);
-
-  switch (selector)
-  {
-  case 0:
-    controllers[0].Kp += value1;
-    controllers[0].Kp = sat(controllers[0].Kp, 0, 50);
-    controllers[1].Kp += value1;
-    controllers[1].Kp = sat(controllers[1].Kp, 0, 50);
-    
-    controllers[2].Kp += value2;
-    controllers[2].Kp = sat(controllers[2].Kp, 0, 50);
-    break;
-  case 1:
-    controllers[0].Kd += 0.4*value1;
-    controllers[0].Kd = sat(controllers[0].Kd, 0, 20);
-    controllers[1].Kd += 0.4*value1;
-    controllers[1].Kd = sat(controllers[1].Kd, 0, 20);
-    
-    controllers[2].Kd += 0.4*value2;
-    controllers[2].Kd = sat(controllers[2].Kd, 0, 20);
-    break;
-  case 2:
-    controllers[0].Ki += 0.05*value1;
-    controllers[0].Ki = sat(controllers[0].Ki, 0, 3);
-    controllers[1].Ki += 0.05*value1;
-    controllers[1].Ki = sat(controllers[1].Ki, 0, 3);
-    
-    controllers[2].Ki += 0.05*value2;
-    controllers[2].Ki = sat(controllers[2].Ki, 0, 3);
-    break;
   }
 }
 
@@ -262,31 +209,31 @@ void handleESPMsg(char msgType, float data[], int len) {
 
 void setup()
 {
-  Serial.begin(9600);
+  Serial.begin(115200);
   radio.begin();
   imu.begin();
+  
   Serial2.begin(115200);
   esp.begin(handleESPMsg);
 
+  // attach motors to pins
   for (int i = 0; i < 4; i++)
     motors[i].attach(motor_pins[i]);
 
   turnMotorsOff();
 
-  delay(3000);
+  delay(1000);
 
   if (radio.inputs[RadioInput::FLY_MODE] < 1200)
     loadPIDParams();
+
   printPIDParams();
+  Serial.println();
+
+  delay(2000);
 }
 
-void loop() {
-  if (Serial2.available()) {
-    esp.updateBuffer(Serial2.read());
-  }
-}
-
-void loop_()
+void loop()
 {
   static float dt, currentTime, timePrev;
 
@@ -317,28 +264,31 @@ void loop_()
   for (int i = 0; i < 4; i++)
     pwm[i] = sat(pwm[i], 1100, 2000);
 
-  if (mot_activated == 1)
+  if (motorsActive)
   {
     Serial.println();
     for (int i = 0; i < 4; i++)
       motors[i].writeMicroseconds(pwm[i]);
   }
     
-  if (mot_activated) 
+  if (motorsActive) 
   {
     if (radio.inputs[RadioInput::THROTTLE] < 1100 &&
         radio.inputs[RadioInput::ARM] < 1500) {
-      mot_activated = 0;
+      motorsActive = false;
       turnMotorsOff();
       savePIDParams();
     }
   }
   else if (radio.inputs[RadioInput::THROTTLE] < 1100 &&
       radio.inputs[RadioInput::ARM] > 1500) {
-    mot_activated = 1;
+    motorsActive = true;
   }
 
-  updatePIDParams();
+  // comunicate with esp32
+  while (Serial2.available()) {
+    esp.updateBuffer(Serial2.read());
+  }
 
   // imu.printRotation();
   // printPIDOut(pid_out);
